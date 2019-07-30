@@ -5,6 +5,8 @@ import com.parse.olimp.entity.Outcome;
 import com.parse.olimp.entity.SportUrl;
 import com.parse.olimp.entity.Tournament;
 import lombok.extern.log4j.Log4j2;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.math.NumberUtils;
 import org.asynchttpclient.AsyncHttpClient;
 import org.asynchttpclient.Request;
 import org.asynchttpclient.RequestBuilder;
@@ -122,7 +124,7 @@ public class ParseService {
 
         try{
             Request getEventPage = new RequestBuilder(HttpConstants.Methods.GET)
-                    .setUrl(urlMain + urlSportPrefix + "/index.php?page=line&addons=1&action=2&mid=50539840")
+                    .setUrl(urlMain + urlSportPrefix + "/index.php?page=line&addons=1&action=2&mid=50569565")
                     .build();
             String responseEventPage = asyncHttpClient.executeRequest(getEventPage).get().getResponseBody();
 
@@ -136,92 +138,105 @@ public class ParseService {
                     String dateTime = rowsTournamentPage.get(0).select("td").get(0).text();
                     System.out.println(dateTime);
 
-                    Element generalMarketTable = rowsTournamentPage.get(1).select("#odd50539840").first();
+                    Element generalMarketTable = rowsTournamentPage.get(1).select("#odd50569565").first();
                     Elements generalMarkets = generalMarketTable.select("b > i");
 
-                    Set<String> markets = marketService.getAllMarket(generalMarkets);
+                    List<String> markets = marketService.getAllMarket(generalMarkets);
+                    marketList.put("General", getGeneralOutcomeByEvent(generalMarketTable));
 
                     markets.forEach(market -> {
-                        if(market.equals("General")){
-                            return;
-                        }
                         Market marketObj = new Market();
                         marketObj.setName(market);
 
                         //Start parse market
-                        String marketPartHtml = "";
-                        try {
+                        String marketPartHtml;
+                        if(marketService.getNextMarket(markets, market) != null) {
                             marketPartHtml = responseEventPage.substring(responseEventPage.indexOf(market),
-                                responseEventPage.indexOf(marketService.getNextMarket(markets, market)));
-                        }catch (Exception ex){
-                            marketPartHtml = responseEventPage.substring(responseEventPage.indexOf(market) + 1,
                                     responseEventPage.indexOf(marketService.getNextMarket(markets, market)));
+                        } else {
+                            String firstPartForParsLastMarket = responseEventPage.substring(0, responseEventPage.indexOf(market));
+                            String shortPartPage = responseEventPage.replace(firstPartForParsLastMarket, "");
+
+                            marketPartHtml = shortPartPage.substring(0, shortPartPage.indexOf("</div>"));
                         }
 
                         Document docMarketPart = Jsoup.parse(marketPartHtml);
 
-/*                        Elements outcomes = docMarketPart.select("span");
-                        for(int j=0; j < outcomes.size(); j++){
-                            Element element = outcomes.select("span").get(j);
-                            Elements elements = element.select("span");
+/*                        List<Outcome> outcomeList = new ArrayList<>();
+                        Elements nobrs = docMarketPart.select("nobr");
+                                Elements outcomesHtml = nobrs.select("span");
 
-                            try {
-                                String dataId = elements.get(j).attr("data-id");
-                                String id = dataId.substring(j, dataId.indexOf(":"));
+                                for(int i1 = 1; i1 < outcomesHtml.size(); i1 = i1 + 4) {
+                                    try {
+                                        Element outcomeHtmlFirstName = outcomesHtml.get(i1);
+                                    Element outcomeHtmlFirstKoefAndId = outcomesHtml.get(i1 + 1);
+                                    String firstDataId = outcomeHtmlFirstKoefAndId.attr("data-id");
 
-                                String outcomeName = docMarketPart.select("nobr").get(1).text();
-                                double outcomeKof = Double.valueOf(elements.get(1).text());
-                            }catch (Exception ex){
-                                log.error(ex.getMessage());
-                            }
-                        }*/
+                                    Outcome outcomeFirst = new Outcome(firstDataId, outcomeHtmlFirstName.text(), Double.valueOf(outcomeHtmlFirstKoefAndId.text()));
+                                    outcomeList.add(outcomeFirst);
 
+                                    System.out.println(outcomeFirst.toString());
+                                    }catch (Exception ex){
+                                        log.error(ex);
+                                    }
+                                }*/
                         List<Outcome> outcomeList = new ArrayList<>();
                         Elements nobrs = docMarketPart.select("nobr");
-                        for(int i1 = 0; i1 < nobrs.size(); i1 ++){
+                        for(int j1 = 0; j1 < nobrs.size(); j1++) {
+                            Elements outcomesHtml = nobrs.get(j1).select("span");
                             try {
-                                Elements outcomesHtml = nobrs.select("span");
-//                                String elementNobrToString = nobrs.get(i1).toString();
-
-                                Element outcomeHtmlFirstName = outcomesHtml.get(2);
-                                Element outcomeHtmlFirstKoefAndId = outcomesHtml.get(3);
+                                Element outcomeHtmlFirstName = outcomesHtml.get(1);
+                                Element outcomeHtmlFirstKoefAndId = outcomesHtml.get(2);
                                 String firstDataId = outcomeHtmlFirstKoefAndId.attr("data-id");
 
-                                Outcome outcomeFirst = new Outcome(firstDataId, outcomeHtmlFirstName.text(), Double.valueOf(outcomeHtmlFirstKoefAndId.text()));
-                                outcomeList.add(outcomeFirst);
+                                String name = outcomeHtmlFirstName.html();
+                                if(!NumberUtils.isCreatable(name)){
+                                    if(name.contains("<span")){
+                                        //First market in nobr
+                                        Outcome outcome = new Outcome();
+                                        int firstSpanTag = name.indexOf("span");
+                                        int secondSpanTag = getNextSpanTag(name, firstSpanTag);
+                                        int thirdSpanTag = getNextSpanTag(name, secondSpanTag);
+                                        int fourthSpanTag = getNextSpanTag(name, thirdSpanTag);
+                                        int fifthSpanTag = getNextSpanTag(name, fourthSpanTag);
 
-/*                                int firstSpanTag = elementNobrToString.indexOf("span");
-                                int secondSpanTag = elementNobrToString.indexOf("span", firstSpanTag + 1);
-                                int thirdSpanTag = elementNobrToString.indexOf("span", secondSpanTag + 1);
+                                        outcome.setId(getElementInDocumentBetweenSpanTags(name, firstSpanTag, fourthSpanTag).attr("data-id"));
+                                        outcome.setName(name.substring(name.indexOf("nobr") + 1, firstSpanTag - 1)
+                                                .replace("&nbsp;", "").replace("\n", "").trim());
+                                        outcome.setStatKef(Double.valueOf(getElementInDocumentBetweenSpanTags(name, secondSpanTag, thirdSpanTag).text()));
 
-                                outcome.setName(elementNobrToString.substring(elementNobrToString.indexOf("nobr") + 5, firstSpanTag - 1)
-                                        .replace("&nbsp;", "").replace("\n", "").trim());*/
+                                        System.out.println(outcome.toString());
 
-/*                                int fourthSpanTag = elementNobrToString.indexOf("span", thirdSpanTag + 1);
-                                int fifthSpanTag = elementNobrToString.indexOf("span", fourthSpanTag + 1);
+                                        int sixthSpanTag = getNextSpanTag(name, fifthSpanTag);
+                                        int sevenSpanTag = getNextSpanTag(name, sixthSpanTag);
+                                        int eightSpanTag = getNextSpanTag(name, sevenSpanTag);
 
-                                outcome.setName(elementNobrToString.substring(fourthSpanTag + 5, fifthSpanTag - 1).replace("&nbsp;", "")
-                                        .replace("\n", "").trim());*/
-//                                outcomeList.add(outcome);
-                                outcomeFirst.toString();
+                                        //Second market in nobr
+                                        Outcome outcome1 = new Outcome();
+                                        outcome1.setId(getElementInDocumentBetweenSpanTags(name, fifthSpanTag, eightSpanTag).attr("data-id"));
+                                        outcome1.setName(name.substring(fourthSpanTag, fifthSpanTag)
+                                                .replace("&nbsp;", "")
+                                                .replace("\n", "")
+                                                .replace("span>", "")
+                                                .replace(">", "")
+                                                .replace("<", "").trim());
+                                        outcome1.setStatKef(Double.valueOf(getElementInDocumentBetweenSpanTags(name, sixthSpanTag, sevenSpanTag).text()));
 
-                                Element outcomeHtmlSecondName = outcomesHtml.get(5);
-                                Element outcomeHtmlSecondKoefAndId = outcomesHtml.get(6);
-                                String secondDataId = outcomeHtmlSecondKoefAndId.attr("data-id");
+                                        System.out.println(outcome1.toString());
+                                    }
 
-                                Outcome outcomeSecond = new Outcome(secondDataId, outcomeHtmlSecondName.text(), Double.valueOf(outcomeHtmlSecondKoefAndId.text()));
-                                outcomeList.add(outcomeSecond);
+                                    Outcome outcomeFirst = new Outcome(firstDataId, name, Double.valueOf(outcomeHtmlFirstKoefAndId.text()));
+                                    System.out.println(outcomeFirst.toString());
+                                }
 
-                                outcomeSecond.toString();
-                            }catch (Exception ex){
-                                log.error(ex.getMessage());
+                            } catch (Exception ex) {
+                                log.error(ex);
                             }
                         }
+
                         marketObj.setOutcomes(outcomeList);
                         marketList.put(market, outcomeList);
                     });
-
-                    marketList.put("General", getGeneralOutcomeByEvent(generalMarketTable));
 
                 }catch (Exception ex){
                     //not necessary exception, error in parse table with tournaments
@@ -230,6 +245,15 @@ public class ParseService {
         }catch (Exception ex){
             log.error(ex);
         }
+    }
+
+    private Element getElementInDocumentBetweenSpanTags(String name, int secondSpanTag, int thirdSpanTag) {
+        Document docKoef = Jsoup.parse("<" + name.substring(secondSpanTag, thirdSpanTag) + "span>");
+        return docKoef.select("span").first();
+    }
+
+    private int getNextSpanTag(String name, int beforeSpanTag) {
+        return name.indexOf("span", beforeSpanTag + 1);
     }
 
     private List<Outcome> getGeneralOutcomeByEvent(Element generalMarketTable) {
@@ -257,8 +281,6 @@ public class ParseService {
     }
 
     public static void main(String[] args) {
-        String qwerty = "qwerty";
-        System.out.println(qwerty.substring(1));
+        System.out.println(NumberUtils.isCreatable("1.18"));
     }
-
 }
